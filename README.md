@@ -2,8 +2,8 @@
 
 TODO:
 * Fix the model
-* Improve dataloading
+* Improve/refactor dataloading
 * Add maximum classifier discrepancy
+* Incorporate data domain class
+* Incorporate domain standardization
 * Figure out gradient reversal? Is that necessary
-* Maybe just manually label some of the test set since too annoying to load to kaggle
-* Maybe just do it all in one notebook in colab...
