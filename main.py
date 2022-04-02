@@ -25,7 +25,7 @@ FT_OUT_SIZE = 1280
 N_EPOCH = 30
 
 dataset_root = './data'
-output_root = './submission/03292022_efficientnet_b0custom2v3'
+output_root = './submission/03292022_efficientnet_b0custom2v9'
 source_dataset_name = 'train_set'
 target_dataset_name = 'test_set'
 
@@ -191,23 +191,29 @@ class CNNModel(nn.Module):
             self.feature.add_module('f_pool5', nn.MaxPool2d(2))
             self.feature.add_module('f_relu5', nn.ReLU(True))
 
-        self.class_classifier = nn.Sequential()
-        self.class_classifier.add_module('c_fc1', nn.Linear(FT_OUT_SIZE, 100))
-        self.class_classifier.add_module('c_bn1', nn.BatchNorm1d(100))
-        self.class_classifier.add_module('c_relu1', nn.ReLU(True))
-        self.class_classifier.add_module('c_drop1', nn.Dropout2d())
-        self.class_classifier.add_module('c_fc2', nn.Linear(100, 100))
-        self.class_classifier.add_module('c_bn2', nn.BatchNorm1d(100))
-        self.class_classifier.add_module('c_relu2', nn.ReLU(True))
-        self.class_classifier.add_module('c_fc3', nn.Linear(100, 7))
-        self.class_classifier.add_module('c_softmax', nn.LogSoftmax(dim=1))
-
         self.domain_classifier = nn.Sequential()
-        self.domain_classifier.add_module('d_fc1', nn.Linear(FT_OUT_SIZE, 100))
-        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(100))
-        self.domain_classifier.add_module('d_relu1', nn.ReLU(True))
-        self.domain_classifier.add_module('d_fc2', nn.Linear(100, 4))
-        self.domain_classifier.add_module('d_softmax', nn.LogSoftmax(dim=1))
+        self.domain_classifier.add_module('c_fc1', nn.Linear(FT_OUT_SIZE, 100))
+        self.domain_classifier.add_module('c_bn1', nn.BatchNorm1d(100))
+        self.domain_classifier.add_module('c_relu1', nn.ReLU(True))
+        self.domain_classifier.add_module('c_drop1', nn.Dropout2d())
+        self.domain_classifier.add_module('c_fc2', nn.Linear(100, 100))
+        self.domain_classifier.add_module('c_bn2', nn.BatchNorm1d(100))
+        self.domain_classifier.add_module('c_relu2', nn.ReLU(True))
+        self.domain_classifier.add_module('c_fc3', nn.Linear(100, 100))
+        self.domain_classifier.add_module('c_bn3', nn.BatchNorm1d(100))
+        self.domain_classifier.add_module('c_relu3', nn.ReLU(True))
+        self.domain_classifier.add_module('c_fc4', nn.Linear(100, 4))
+        self.domain_classifier.add_module('c_softmax', nn.LogSoftmax(dim=1))
+
+        self.class_classifier = nn.Sequential()
+        self.class_classifier.add_module('d_fc1', nn.Linear(FT_OUT_SIZE, 100))
+        self.class_classifier.add_module('d_bn1', nn.BatchNorm1d(100))
+        self.class_classifier.add_module('d_relu1', nn.ReLU(True))
+        self.class_classifier.add_module('d_fc2', nn.Linear(100, 100))
+        self.class_classifier.add_module('d_bn2', nn.BatchNorm1d(100))
+        self.class_classifier.add_module('d_relu2', nn.ReLU(True))
+        self.class_classifier.add_module('d_fc3', nn.Linear(100, 7))
+        self.class_classifier.add_module('d_softmax', nn.LogSoftmax(dim=1))
 
     def forward(self, input_data, alpha):
         input_data = input_data.expand(input_data.data.shape[0], 3, IMAGE_SIZE, IMAGE_SIZE)
@@ -252,12 +258,12 @@ def test(net, epoch):
     if cuda:
         net = net.cuda()
 
-    train_pths, train_preds = inference(net, dataloader_source, cuda=cuda, alpha=alpha)
+    train_pths, train_preds = inference(net, dataloader_source, cuda=cuda, alpha=1.0)
     train_results = pd.DataFrame({'id': train_pths, 'label': train_preds})
     train_results_pth = os.path.join(output_root, '%s_train_epoch%s.csv' % (datetime.now().strftime("%m%d%Y"), epoch)).replace('\\','/')
     train_results.to_csv(train_results_pth, index=False)
 
-    test_pths, test_preds = inference(net, dataloader_target, cuda=cuda, alpha=alpha)
+    test_pths, test_preds = inference(net, dataloader_target, cuda=cuda, alpha=1.0)
     test_results = pd.DataFrame({'id': test_pths, 'label': test_preds})
     test_results_pth = os.path.join(output_root, '%s_test_epoch%s.csv' % (datetime.now().strftime("%m%d%Y"), epoch)).replace('\\','/')
     test_results.to_csv(test_results_pth, index=False)
@@ -406,7 +412,7 @@ if __name__ == "__main__":
 
             _, domain_output = my_net(input_data=input_img, alpha=alpha)
             err_t_domain = loss_domain(domain_output, domain_label)
-            err = err_t_domain*3 + err_s_domain + err_s_label
+            err = err_t_domain + err_s_domain + err_s_label
             err.backward()
             optimizer.step()
 
