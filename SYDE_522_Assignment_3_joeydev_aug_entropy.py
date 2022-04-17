@@ -15,8 +15,6 @@ from torchvision import transforms
 from torchvision import datasets
 from torchvision import models
 import torch.optim as optim
-from torch.utils.data import WeightedRandomSampler
-from sklearn.metrics import confusion_matrix
 
 cuda = True
 cudnn.benchmark = True
@@ -27,12 +25,12 @@ LR = 1e-4
 BATCH_SIZE = 32
 IMAGE_SIZE = 224 #227
 # FT_OUT_SIZE = 512
-N_EPOCH = 200
+N_EPOCH = 100
 
 # dataset_root = '/content/drive/MyDrive/4B/SYDE-522/data'
 # output_root = '/content/drive/MyDrive/4B/SYDE-522/submission/04032022_resnet50_aug'
 dataset_root = './data'
-output_root = './submission/04162022_efficientnet_b4_run8'
+output_root = './submission/04092022_efficientnetb4_aug_entropy2'
 source_dataset_name = 'train_set'
 target_dataset_name = 'test_set'
 
@@ -63,10 +61,10 @@ class GetLoader(data.Dataset):
             else: 
                 self.img_labels_temp = ['0' for i in range(len(self.img_paths))]
 
-            if 'label1' in df.columns:
-                self.domain_labels_temp = df['label1'].to_list()
-            else: 
-                self.domain_labels_temp = [0 for i in range(len(self.img_paths_temp))]
+            # if 'label1' in df.columns:
+            #     self.domain_labels_temp = df['label1'].to_list()
+            # else: 
+            self.domain_labels_temp = [0 for i in range(len(self.img_paths_temp))]
 
             # if train:
             #     for i in range(len(self.img_paths_temp)):
@@ -129,7 +127,7 @@ def preprocess_multiple_fn(mus, stds):
 def preprocess_fn(mu=(0.6399, 0.6076, 0.5603), std=(0.3065, 0.3082, 0.3353), aug=False):
   if aug:
     img_transform = transforms.Compose([
-        transforms.RandomCrop(224),
+        transforms.RandomCrop(IMAGE_SIZE),
         transforms.RandomHorizontalFlip(0.5),
         transforms.RandomRotation(15),
         transforms.ColorJitter(brightness=0.5, saturation=0.5),
@@ -147,7 +145,7 @@ def preprocess_fn(mu=(0.6399, 0.6076, 0.5603), std=(0.3065, 0.3082, 0.3353), aug
   return img_transform
 
 def prep_dataloader(image_root, label_list=None, img_transform=None, 
-                    drop_last=False, shuffle=True, train=False):
+                    drop_last=False, shuffle=True, train=True):
     dataset = GetLoader(
         data_root=image_root,
         data_list=label_list,
@@ -155,19 +153,6 @@ def prep_dataloader(image_root, label_list=None, img_transform=None,
         train=train
     )
 
-    # if train:
-    #     targets = np.array(dataset.img_labels)
-    #     weight = np.array([1.5,0.1,0.1,0.1,0.1,0.3,0.1])
-    #     samples_weight = weight[targets]
-    #     samples_weight = torch.from_numpy(samples_weight)
-    #     sampler = WeightedRandomSampler(samples_weight, len(samples_weight))
-    #     dataloader = data.DataLoader(
-    #         dataset=dataset,
-    #         batch_size=BATCH_SIZE,
-    #         num_workers=4,
-    #         drop_last=drop_last,
-    #         sampler=sampler)
-    # else:
     dataloader = data.DataLoader(
         dataset=dataset,
         batch_size=BATCH_SIZE,
@@ -230,58 +215,39 @@ class CNNModel(nn.Module):
             self.feature.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1)) # original is (7,7)
             self.feature.classifier = nn.Identity()
             self.ft_out_size = 1280
-        elif model_name == "efficientnet_b5":
-            self.feature = models.efficientnet_b5(pretrained=True) 
-            self.feature.avgpool = nn.AdaptiveAvgPool2d(output_size=(1, 1)) # original is (7,7)
-            self.feature.classifier = nn.Identity()
-            self.ft_out_size = 2048
         else:
             # Need some default model?
             self.feature = nn.Sequential()
-            self.feature.add_module('f_conv1', nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1))
-            self.feature.add_module('f_relu1', nn.LeakyReLU(0.2,True))
-            
-            self.feature.add_module('f_conv2', nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1, bias=False))
+            self.feature.add_module('f_conv1', nn.Conv2d(3, 64, kernel_size=5))
+            self.feature.add_module('f_bn1', nn.BatchNorm2d(64))
+            self.feature.add_module('f_pool1', nn.MaxPool2d(2))
+            self.feature.add_module('f_relu1', nn.ReLU(True))
+            self.feature.add_module('f_conv2', nn.Conv2d(64, 128, kernel_size=3))
             self.feature.add_module('f_bn2', nn.BatchNorm2d(128))
-            self.feature.add_module('f_relu2', nn.LeakyReLU(0.2,True))
-            self.feature.add_module('f_conv3', nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1, bias=False))
+            self.feature.add_module('f_drop1', nn.Dropout2d())
+            self.feature.add_module('f_pool2', nn.MaxPool2d(2))
+            self.feature.add_module('f_relu2', nn.ReLU(True))
+            self.feature.add_module('f_conv3', nn.Conv2d(128, 256, kernel_size=3))
             self.feature.add_module('f_bn3', nn.BatchNorm2d(256))
-            self.feature.add_module('f_relu3', nn.LeakyReLU(0.2,True))
-            self.feature.add_module('f_conv4', nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1, bias=False))
-            self.feature.add_module('f_bn4', nn.BatchNorm2d(512))
-            self.feature.add_module('f_relu4', nn.LeakyReLU(0.2,True))
-            self.feature.add_module('f_conv5', nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1, bias=False))
+            self.feature.add_module('f_drop3', nn.Dropout2d())
+            self.feature.add_module('f_pool3', nn.MaxPool2d(2))
+            self.feature.add_module('f_relu4', nn.ReLU(True))
+            self.feature.add_module('f_conv4', nn.Conv2d(256, 256, kernel_size=3))
+            self.feature.add_module('f_bn4', nn.BatchNorm2d(256))
+            self.feature.add_module('f_drop4', nn.Dropout2d())
+            self.feature.add_module('f_pool4', nn.MaxPool2d(2))
+            self.feature.add_module('f_relu4', nn.ReLU(True))
+            self.feature.add_module('f_conv5', nn.Conv2d(256, 512, kernel_size=3))
             self.feature.add_module('f_bn5', nn.BatchNorm2d(512))
-            self.feature.add_module('f_relu5', nn.LeakyReLU(0.2,True))
-            self.feature.add_module('f_conv6', nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1, bias=False))
-            self.feature.add_module('f_bn6', nn.BatchNorm2d(512))
-            self.feature.add_module('f_relu6', nn.LeakyReLU(0.2,True))
-
-            self.feature.add_module('f_conv7', nn.Conv2d(512, 100, kernel_size=4, stride=1, padding=0, bias=False))
-            self.ft_out_size = 100
+            self.feature.add_module('f_drop5', nn.Dropout2d())
+            self.feature.add_module('f_pool5', nn.MaxPool2d(2))
+            self.feature.add_module('f_relu5', nn.ReLU(True))
 
         self.class_classifier = nn.Sequential()
-
-        ##
-        # self.class_classifier.add_module('conv1', nn.Conv2d(self.ft_out_size, 7, 3, 1, 1, bias=False))
-
-        ##
-        # self.class_classifier.add_module('pool', nn.AdaptiveAvgPool2d(output_size=(1, 1)))
-        # self.class_classifier.add_module('conv1', nn.Conv2d(self.ft_out_size, 7, 1, 1, 0, bias=False))
-        
-        ##
-        self.class_classifier.add_module('c_fc1', nn.Linear(self.ft_out_size, 1000))
-        self.class_classifier.add_module('c_bn1', nn.BatchNorm1d(1000))
-        self.class_classifier.add_module('c_relu1', nn.LeakyReLU(0.2,True))
+        self.class_classifier.add_module('c_fc1', nn.Linear(self.ft_out_size, 100))
+        self.class_classifier.add_module('c_bn1', nn.BatchNorm1d(100))
+        self.class_classifier.add_module('c_relu1', nn.ReLU(True))
         self.class_classifier.add_module('c_drop1', nn.Dropout2d())
-        self.class_classifier.add_module('c2_fc1', nn.Linear(1000, 500))
-        self.class_classifier.add_module('c2_bn1', nn.BatchNorm1d(500))
-        self.class_classifier.add_module('c2_relu1', nn.LeakyReLU(0.2,True))
-        self.class_classifier.add_module('c2_drop1', nn.Dropout2d())
-        self.class_classifier.add_module('c3_fc1', nn.Linear(500, 100))
-        self.class_classifier.add_module('c3_bn1', nn.BatchNorm1d(100))
-        self.class_classifier.add_module('c3_relu1', nn.LeakyReLU(0.2,True))
-        self.class_classifier.add_module('c3_drop1', nn.Dropout2d())
         self.class_classifier.add_module('c_fc2', nn.Linear(100, 100))
         self.class_classifier.add_module('c_bn2', nn.BatchNorm1d(100))
         self.class_classifier.add_module('c_relu2', nn.ReLU(True))
@@ -289,29 +255,12 @@ class CNNModel(nn.Module):
         self.class_classifier.add_module('c_softmax', nn.LogSoftmax(dim=1))
 
         self.domain_classifier = nn.Sequential()
-        
-        ##
-        # self.domain_classifier.add_module('conv1', nn.Conv2d(self.ft_out_size, 4, 3, 1, 1, bias=False))
-
-        ##
-        # self.domain_classifier.add_module('pool', nn.AdaptiveAvgPool2d(output_size=(1, 1)))
-        # self.domain_classifier.add_module('conv1', nn.Conv2d(self.ft_out_size, 4, 1, 1, 0, bias=False))
-    
-        ##
-        self.domain_classifier.add_module('d_fc1', nn.Linear(self.ft_out_size, 1000))
-        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(1000))
-        self.domain_classifier.add_module('d_relu1', nn.LeakyReLU(0.2,True))
-        self.domain_classifier.add_module('d_fc2', nn.Linear(1000, 500))
-        self.domain_classifier.add_module('d_bn2', nn.BatchNorm1d(500))
-        self.domain_classifier.add_module('d_relu2', nn.LeakyReLU(0.2,True))
-        self.domain_classifier.add_module('d_fc3', nn.Linear(500, 100))
-        self.domain_classifier.add_module('d_bn3', nn.BatchNorm1d(100))
-        self.domain_classifier.add_module('d_relu3', nn.LeakyReLU(0.2,True))
-        self.domain_classifier.add_module('d_fc4', nn.Linear(100, 100))
-        self.domain_classifier.add_module('d_bn4', nn.BatchNorm1d(100))
-        self.domain_classifier.add_module('d_relu4', nn.ReLU(True))
-        self.domain_classifier.add_module('d_fc6', nn.Linear(100, 4))
+        self.domain_classifier.add_module('d_fc1', nn.Linear(self.ft_out_size, 100))
+        self.domain_classifier.add_module('d_bn1', nn.BatchNorm1d(100))
+        self.domain_classifier.add_module('d_relu1', nn.ReLU(True))
+        self.domain_classifier.add_module('d_fc2', nn.Linear(100, 2))
         self.domain_classifier.add_module('d_softmax', nn.LogSoftmax(dim=1))
+        
 
 
     def forward(self, input_data, alpha):
@@ -319,14 +268,8 @@ class CNNModel(nn.Module):
         feature = self.feature(input_data)
         feature = feature.view(-1, self.ft_out_size)
         reverse_feature = ReverseLayerF.apply(feature, alpha)
-
-        # feature = torch.unsqueeze(torch.unsqueeze(feature, -1),-1)
         class_output = self.class_classifier(feature)
-        # reverse_feature = torch.unsqueeze(torch.unsqueeze(reverse_feature, -1),-1)
         domain_output = self.domain_classifier(reverse_feature)
-
-        # class_output = torch.squeeze(torch.squeeze(class_output))
-        # domain_output = torch.squeeze(torch.squeeze(domain_output))
 
         return class_output, domain_output
 
@@ -392,26 +335,9 @@ def inference(net, dataloader, cuda=True, alpha=0.0):
             input_img = input_img.cuda()
 
         class_output, _ = net(input_data=input_img, alpha=alpha)
-        pred = torch.argmax(class_output.data, dim=1, keepdim=True)
-        
+        pred = class_output.data.max(1, keepdim=True)[1]
         pths = pths + list(img_paths)
         preds = preds + list(pred.squeeze(1).cpu().numpy())
-
-        # class_output = torch.exp(class_output)
-        # prob = list(class_output.topk(1, dim=1)[0][:,0].detach().cpu().numpy())
-        # pred_first = list(class_output.topk(2, dim=1)[1][:,0].cpu().numpy())
-        # pred_second = list(class_output.topk(2, dim=1)[1][:,1].cpu().numpy())
-        # for i in range(len(prob)):
-        #     if np.random.uniform() <= prob[i]:
-        #         preds.append(pred_first[i])
-        #     else:
-        #         choices = list(range(0,7))
-        #         choices.remove(pred_first[i])
-        #         preds.append(random.choice(choices))
-
-
-
-        
     return pths, preds
 
 def compare(true_labels, predicted_labels, train=False):
@@ -426,8 +352,6 @@ def compare(true_labels, predicted_labels, train=False):
 
     true_labels = np.array(combined_df['label2'].to_list())
     pred_labels = np.array(combined_df['label'].to_list())
-
-    print(confusion_matrix(true_labels,pred_labels))
 
     return np.sum(true_labels == pred_labels) / len(true_labels)
 
@@ -491,6 +415,7 @@ for epoch in range(N_EPOCH):
 
         p = float(i + epoch * len_dataloader) / N_EPOCH / len_dataloader
         alpha = 2. / (1. + np.exp(-10 * p)) - 1
+        alpha = 1. / (1. + np.exp(-10 * (epoch-N_EPOCH//2))) 
 
         # training model using source data
         data_source = data_source_iter.next()
@@ -528,7 +453,7 @@ for epoch in range(N_EPOCH):
         batch_size = len(t_img) # TODO: why?
 
         input_img = torch.FloatTensor(batch_size, 3, IMAGE_SIZE, IMAGE_SIZE)
-        domain_label = torch.ones(batch_size)  * 3.0
+        domain_label = torch.ones(batch_size) 
         domain_label = domain_label.long()
 
         if cuda:
@@ -539,9 +464,9 @@ for epoch in range(N_EPOCH):
         input_img.resize_as_(t_img).copy_(t_img)
 
         _, domain_output = my_net(input_data=input_img, alpha=alpha)
-        err_t_domain = loss_domain(domain_output, domain_label)
         entropy_loss = torch.mean(class_output)
-        err = err_t_domain + err_s_domain + err_s_label
+        err_t_domain = loss_domain(domain_output, domain_label)
+        err = err_t_domain + err_s_domain + err_s_label + 0.01*alpha*entropy_loss
         err.backward()
         optimizer.step()
 
